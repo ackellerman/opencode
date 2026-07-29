@@ -258,6 +258,9 @@ const layer = Layer.effect(
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "config.json"), env))
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "opencode.json"), env))
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "opencode.jsonc"), env))
+      if (process.env.OPENCODE_DEV) {
+        result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "opencode-dev.json"), env))
+      }
 
       const legacy = path.join(Global.Path.config, "config")
       if (existsSync(legacy)) {
