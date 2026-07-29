@@ -2050,3 +2050,119 @@ test("parseManagedPlist handles empty config", async () => {
   )
   expect(config.$schema).toBe("https://opencode.ai/config.json")
 })
+
+// === delegation_models config tests ===
+
+describe("delegation_models", () => {
+  it.instance("parses valid delegation_models array", () =>
+    Effect.gen(function* () {
+      const config = yield* Config.use.get()
+      expect(config.delegation_models).toBeDefined()
+      expect(config.delegation_models).toEqual([
+        { model: "anthropic/claude-sonnet-4-5", description: "Fast general-purpose model" },
+        { model: "openai/gpt-5", description: "Reasoning model" },
+      ])
+    }),
+    {
+      config: {
+        delegation_models: [
+          { model: "anthropic/claude-sonnet-4-5", description: "Fast general-purpose model" },
+          { model: "openai/gpt-5", description: "Reasoning model" },
+        ],
+      },
+    },
+  )
+
+  it.instance("loads without error when delegation_models is absent", () =>
+    Effect.gen(function* () {
+      const config = yield* Config.use.get()
+      expect(config.delegation_models).toBeUndefined()
+      expect(config.model).toBe("test/model")
+    }),
+    { config: { model: "test/model" } },
+  )
+
+  it.instance("rejects malformed model string (no provider prefix)", () =>
+    Effect.gen(function* () {
+      const exit = yield* Config.use.get().pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+    }),
+    {
+      config: {
+        delegation_models: [{ model: "not-a-valid-model", description: "Missing slash" }],
+      },
+    },
+  )
+
+  it.instance("rejects malformed model string (empty provider)", () =>
+    Effect.gen(function* () {
+      const exit = yield* Config.use.get().pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+    }),
+    {
+      config: {
+        delegation_models: [{ model: "/only-model-suffix", description: "Empty provider prefix" }],
+      },
+    },
+  )
+
+  it.instance("rejects empty description", () =>
+    Effect.gen(function* () {
+      const exit = yield* Config.use.get().pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+    }),
+    {
+      config: {
+        delegation_models: [{ model: "anthropic/claude-sonnet-4-5", description: "" }],
+      },
+    },
+  )
+
+  it.instance("rejects whitespace-only description", () =>
+    Effect.gen(function* () {
+      const exit = yield* Config.use.get().pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+    }),
+    {
+      config: {
+        delegation_models: [{ model: "anthropic/claude-sonnet-4-5", description: "   " }],
+      },
+    },
+  )
+
+  it.instance("deduplicates model strings (last wins) with warning", () =>
+    Effect.gen(function* () {
+      const config = yield* Config.use.get()
+      expect(config.delegation_models).toBeDefined()
+      expect(config.delegation_models!.length).toBe(2)
+      expect(config.delegation_models).toEqual([
+        { model: "anthropic/claude-sonnet-4-5", description: "Fast general-purpose model" },
+        { model: "openai/gpt-5", description: "Updated description (last wins)" },
+      ])
+    }),
+    {
+      config: {
+        delegation_models: [
+          { model: "anthropic/claude-sonnet-4-5", description: "Fast general-purpose model" },
+          { model: "openai/gpt-5", description: "First description" },
+          { model: "openai/gpt-5", description: "Updated description (last wins)" },
+        ],
+      },
+    },
+  )
+
+  it.instance("handles model IDs with slashes (e.g. openrouter/openai/gpt-5)", () =>
+    Effect.gen(function* () {
+      const config = yield* Config.use.get()
+      expect(config.delegation_models).toBeDefined()
+      expect(config.delegation_models).toEqual([
+        { model: "openrouter/openai/gpt-5", description: "Multi-slash model ID" },
+      ])
+    }),
+    {
+      config: {
+        delegation_models: [{ model: "openrouter/openai/gpt-5", description: "Multi-slash model ID" }],
+      },
+    },
+  )
+})

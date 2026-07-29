@@ -2,6 +2,14 @@ Launch a new agent to handle complex, multistep tasks autonomously.
 
 When using the Task tool, you must specify a subagent_type parameter to select which agent type to use.
 
+Available parameters:
+- description: A short (3-5 words) description of the task
+- prompt: The task for the agent to perform
+- subagent_type: The type of specialized agent to use for this task (required)
+- model: Optional model override from the delegation_models catalog (format: provider/model, e.g. anthropic/claude-sonnet-4-5). Only use if the user explicitly requests a specific model that is listed in the catalog. If not provided, the agent's configured model or the parent message's model is used.
+- task_id: Resume a previous task session
+- background: Run the agent asynchronously in the background
+
 When NOT to use the Task tool:
 - If you want to read a specific file path, use the Read or Glob tool instead of the Task tool, to find the match more quickly
 - If you are searching for a specific class definition like "class Foo", use the Grep tool instead, to find the match more quickly

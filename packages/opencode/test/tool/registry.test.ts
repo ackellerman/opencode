@@ -569,4 +569,88 @@ describe("tool.registry", () => {
       expect(ids).toContain("cowsay")
     }),
   )
+
+  // === delegation models in describeTask ===
+  const withDelegationModels = testEffect(
+    LayerNode.compile(root, [
+      [
+        Config.node,
+        TestConfig.layer({
+          get: () =>
+            Effect.succeed({
+              delegation_models: [
+                { model: "anthropic/claude-sonnet-4-5", description: "Fast general-purpose model" },
+                { model: "openai/gpt-5", description: "Advanced reasoning model" },
+              ],
+            }),
+        }),
+      ],
+      [RuntimeFlags.node, RuntimeFlags.layer()],
+    ]),
+  )
+
+  const withEmptyDelegationModels = testEffect(
+    LayerNode.compile(root, [
+      [
+        Config.node,
+        TestConfig.layer({
+          get: () =>
+            Effect.succeed({
+              delegation_models: [],
+            }),
+        }),
+      ],
+      [RuntimeFlags.node, RuntimeFlags.layer()],
+    ]),
+  )
+
+  withDelegationModels.instance("appends delegation models block to task tool description", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const agents = yield* Agent.Service
+      const tools = yield* registry.tools({
+        providerID: ProviderV2.ID.opencode,
+        modelID: ModelV2.ID.make("test"),
+        agent: yield* agents.defaultInfo(),
+      })
+      const task = tools.find((tool) => tool.id === "task")
+      if (!task) throw new Error("task tool not found")
+
+      expect(task.description).toContain("Available delegation models (use with the model parameter):")
+      expect(task.description).toContain("- anthropic/claude-sonnet-4-5: Fast general-purpose model")
+      expect(task.description).toContain("- openai/gpt-5: Advanced reasoning model")
+    }),
+  )
+
+  it.instance("does not include delegation models block when delegation_models is absent", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const agents = yield* Agent.Service
+      const tools = yield* registry.tools({
+        providerID: ProviderV2.ID.opencode,
+        modelID: ModelV2.ID.make("test"),
+        agent: yield* agents.defaultInfo(),
+      })
+      const task = tools.find((tool) => tool.id === "task")
+      if (!task) throw new Error("task tool not found")
+
+      expect(task.description).not.toContain("Available delegation models")
+    }),
+  )
+
+  withEmptyDelegationModels.instance("does not include delegation models block when catalog is empty", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const agents = yield* Agent.Service
+      const tools = yield* registry.tools({
+        providerID: ProviderV2.ID.opencode,
+        modelID: ModelV2.ID.make("test"),
+        agent: yield* agents.defaultInfo(),
+      })
+      const task = tools.find((tool) => tool.id === "task")
+      if (!task) throw new Error("task tool not found")
+
+      expect(task.description).not.toContain("Available delegation models")
+    }),
+  )
 })

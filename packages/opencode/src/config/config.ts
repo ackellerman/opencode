@@ -23,7 +23,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
 import { containsPath, type InstanceContext } from "../project/instance-context"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
-import { RemoteAuthError } from "@opencode-ai/core/v1/config/error"
+import { InvalidError, RemoteAuthError } from "@opencode-ai/core/v1/config/error"
 import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
 import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
 import { ConfigAgent } from "./agent"
@@ -583,6 +583,46 @@ const layer = Layer.effect(
           result.compaction = { ...result.compaction, prune: false }
         }
 
+        // Validate delegation_models entries
+        if (result.delegation_models && result.delegation_models.length > 0) {
+          for (const entry of result.delegation_models) {
+            // Validate model string: must parse as provider/model
+            const parts = entry.model.split("/")
+            if (parts.length < 2 || !parts[0] || !parts.slice(1).join("/")) {
+              return yield* Effect.fail(
+                new InvalidError({
+                  path: "delegation_models",
+                  message: `Invalid model string "${entry.model}" in delegation_models: must be "providerID/modelID" format`,
+                }),
+              )
+            }
+            // Validate description is non-empty
+            if (!entry.description || entry.description.trim().length === 0) {
+              return yield* Effect.fail(
+                new InvalidError({
+                  path: "delegation_models",
+                  message: `Empty description for model "${entry.model}" in delegation_models`,
+                }),
+              )
+            }
+          }
+          // Warn on duplicate model strings (last wins)
+          const seen = new Set<string>()
+          const deduped: typeof result.delegation_models = []
+          for (const entry of [...result.delegation_models].reverse()) {
+            if (!seen.has(entry.model)) {
+              seen.add(entry.model)
+              deduped.unshift(entry)
+            }
+          }
+          if (deduped.length < result.delegation_models.length) {
+            yield* Effect.logWarning("Duplicate model entries found in delegation_models; using last occurrence", {
+              count: result.delegation_models.length - deduped.length,
+            })
+            result.delegation_models = deduped
+          }
+        }
+
         return {
           config: result,
           directories,
@@ -676,6 +716,16 @@ export const node = LayerNode.make({
   service: Service,
   layer: layer,
   deps: [FSUtil.node, Auth.node, Account.node, Env.node, Npm.node, httpClient],
+})
+
+/**
+ * Reads the delegation_models array from the loaded config.
+ * Returns the entries (with duplicates already deduplicated by the loading pipeline),
+ * or an empty array if delegation_models is not configured.
+ */
+export const getDelegationModels = Effect.fn("Config.getDelegationModels")(function* () {
+  const config = yield* use.get()
+  return config.delegation_models ?? []
 })
 
 export * as Config from "./config"

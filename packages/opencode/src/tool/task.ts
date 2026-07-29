@@ -10,6 +10,7 @@ import { Agent } from "../agent/agent"
 import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
+import { Provider } from "@/provider/provider"
 import { Effect, Exit, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -44,6 +45,10 @@ const BaseParameterFields = {
   description: Schema.String.annotate({ description: "A short (3-5 words) description of the task" }),
   prompt: Schema.String.annotate({ description: "The task for the agent to perform" }),
   subagent_type: Schema.String.annotate({ description: "The type of specialized agent to use for this task" }),
+  model: Schema.optional(Schema.String).annotate({
+    description:
+      "Optional model override from the delegation_models catalog. Format: provider/model (e.g. anthropic/claude-sonnet-4-5). Only models listed in delegation_models config are accepted. If not provided, the agent's configured model or the parent message's model is used.",
+  }),
   task_id: Schema.optional(Schema.String).annotate({
     description:
       "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
@@ -178,9 +183,35 @@ export const TaskTool = Tool.define(
       if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
       const variant = msg.info.variant
 
-      const model = next.model ?? {
-        modelID: msg.info.modelID,
-        providerID: msg.info.providerID,
+      let model: { modelID: typeof msg.info.modelID; providerID: typeof msg.info.providerID }
+      let clearVariant = false
+
+      if (params.model) {
+        const delegationModels = cfg.delegation_models ?? []
+        if (delegationModels.length === 0) {
+          return yield* Effect.fail(
+            new Error(
+              `No delegation_models configured. Remove the 'model' parameter or configure delegation_models in opencode.json to enable model overrides.`,
+            ),
+          )
+        }
+        const found = delegationModels.find((entry) => entry.model === params.model)
+        if (!found) {
+          const available = delegationModels.map((m) => m.model).join(", ")
+          return yield* Effect.fail(
+            new Error(
+              `Model "${params.model}" is not in the delegation_models catalog. Available models: ${available}`,
+            ),
+          )
+        }
+        model = Provider.parseModel(params.model)
+        clearVariant = true
+      } else {
+        model = next.model ?? {
+          modelID: msg.info.modelID,
+          providerID: msg.info.providerID,
+        }
+        clearVariant = !!next.model
       }
       const metadata = {
         parentSessionId: ctx.sessionID,
@@ -206,7 +237,7 @@ export const TaskTool = Tool.define(
             modelID: model.modelID,
             providerID: model.providerID,
           },
-          variant: next.model ? undefined : variant,
+          variant: clearVariant ? undefined : variant,
           agent: next.name,
           parts,
         })

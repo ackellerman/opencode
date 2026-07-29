@@ -257,20 +257,27 @@ const layer = Layer.effect(
       return (yield* all()).map((tool) => tool.id)
     })
 
-    const describeTask = Effect.fn("ToolRegistry.describeTask")(function* (agent: Agent.Info) {
-      const items = (yield* agents.list()).filter((item) => item.mode !== "primary")
-      const filtered = items.filter(
-        (item) => Permission.evaluate("task", item.name, agent.permission).action !== "deny",
-      )
-      const list = filtered.toSorted((a, b) => a.name.localeCompare(b.name))
-      const description = list
-        .map(
-          (item) =>
-            `- ${item.name}: ${item.description ?? "This subagent should only be called manually by the user."}`,
+    const describeTask = Effect.fn("ToolRegistry.describeTask")(
+      function* (agent: Agent.Info, delegationModels: Array<{ model: string; description: string }>) {
+        const items = (yield* agents.list()).filter((item) => item.mode !== "primary")
+        const filtered = items.filter(
+          (item) => Permission.evaluate("task", item.name, agent.permission).action !== "deny",
         )
-        .join("\n")
-      return ["Available agent types and the tools they have access to:", description].join("\n")
-    })
+        const list = filtered.toSorted((a, b) => a.name.localeCompare(b.name))
+        const description = list
+          .map(
+            (item) =>
+              `- ${item.name}: ${item.description ?? "This subagent should only be called manually by the user."}`,
+          )
+          .join("\n")
+        const modelsBlock =
+          delegationModels.length > 0
+            ? "\n\nAvailable delegation models (use with the model parameter):\n" +
+              delegationModels.map((m) => `- ${m.model}: ${m.description}`).join("\n")
+            : ""
+        return `Available agent types and the tools they have access to:\n${description}${modelsBlock}`
+      },
+    )
 
     const describeCodeMode = Effect.fn("ToolRegistry.describeCodeMode")(function* (input: {
       agent: Agent.Info
@@ -301,6 +308,7 @@ const layer = Layer.effect(
         ? yield* describeCodeMode(input)
         : undefined
       const visible = filtered.filter((tool) => tool.id !== "execute" || codeModeDescription)
+      const delegationModels = (yield* config.get()).delegation_models ?? []
 
       return yield* Effect.forEach(
         visible,
@@ -319,7 +327,7 @@ const layer = Layer.effect(
             id: tool.id,
             description: [
               output.description,
-              tool.id === TaskTool.id ? yield* describeTask(input.agent) : undefined,
+              tool.id === TaskTool.id ? yield* describeTask(input.agent, delegationModels) : undefined,
               tool.id === "execute" ? codeModeDescription : undefined,
             ]
               .filter(Boolean)

@@ -982,4 +982,348 @@ describe("tool.task", () => {
       expect((yield* jobs.get(grandchild.id))?.status).toBe("cancelled")
     }),
   )
+
+  // ── model parameter tests ──
+
+  it.instance(
+    "uses the delegation model when model param matches an entry in the catalog",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+        const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+        yield* def.execute(
+          {
+            description: "lookup report",
+            prompt: "produce a report",
+            subagent_type: "general",
+            model: "test/delegation-model",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(seen?.model).toBeDefined()
+        expect(seen?.model?.providerID).toBe(ProviderV2.ID.make("test"))
+        expect(seen?.model?.modelID).toBe(ModelV2.ID.make("delegation-model"))
+        expect(seen?.variant).toBeUndefined()
+      }),
+    {
+      config: {
+        delegation_models: [{ model: "test/delegation-model", description: "Test delegation model" }],
+      },
+    },
+  )
+
+  it.instance(
+    "falls back to parent model when model param is absent (no regression)",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+        const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+        yield* def.execute(
+          {
+            description: "lookup report",
+            prompt: "produce a report",
+            subagent_type: "general",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(seen?.model).toBeDefined()
+        expect(seen?.model?.providerID).toBe(ref.providerID)
+        expect(seen?.model?.modelID).toBe(ref.modelID)
+        expect(seen?.variant).toBe("xhigh")
+      }),
+    {
+      config: {
+        delegation_models: [{ model: "test/delegation-model", description: "Test delegation model" }],
+      },
+    },
+  )
+
+  it.instance(
+    "returns error when model param is not in the delegation catalog",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+
+        const exit = yield* def
+          .execute(
+            {
+              description: "lookup report",
+              prompt: "produce a report",
+              subagent_type: "general",
+              model: "provider/unknown-model",
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              extra: { promptOps: stubOps() },
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          )
+          .pipe(Effect.exit)
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        const cause = Exit.isFailure(exit) ? exit.cause : undefined
+        expect(String(cause)).toContain("not in the delegation_models catalog")
+      }),
+    {
+      config: {
+        delegation_models: [{ model: "test/delegation-model", description: "Test delegation model" }],
+      },
+    },
+  )
+
+  it.instance(
+    "returns error when model param is provided but no delegation_models are configured",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+
+        const exit = yield* def
+          .execute(
+            {
+              description: "lookup report",
+              prompt: "produce a report",
+              subagent_type: "general",
+              model: "provider/some-model",
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              extra: { promptOps: stubOps() },
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          )
+          .pipe(Effect.exit)
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        const cause = Exit.isFailure(exit) ? exit.cause : undefined
+        expect(String(cause)).toContain("No delegation_models configured")
+      }),
+    {
+      config: {
+        delegation_models: [],
+      },
+    },
+  )
+
+  // ── reasoning model pass-through tests (E3) ──
+
+  it.instance(
+    "passes Anthropic reasoning model through to subagent prompt with correct IDs",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+        const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+        yield* def.execute(
+          {
+            description: "analyze code",
+            prompt: "find the bug",
+            subagent_type: "general",
+            model: "anthropic/claude-opus-4-5",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(seen?.model?.providerID).toBe(ProviderV2.ID.make("anthropic"))
+        expect(seen?.model?.modelID).toBe(ModelV2.ID.make("claude-opus-4-5"))
+        expect(seen?.variant).toBeUndefined()
+      }),
+    {
+      config: {
+        delegation_models: [
+          { model: "anthropic/claude-opus-4-5", description: "Anthropic reasoning model" },
+        ],
+      },
+    },
+  )
+
+  it.instance(
+    "passes OpenAI reasoning model through to subagent prompt with correct IDs",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+        const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+        yield* def.execute(
+          {
+            description: "analyze code",
+            prompt: "find the bug",
+            subagent_type: "general",
+            model: "openai/gpt-5",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(seen?.model?.providerID).toBe(ProviderV2.ID.make("openai"))
+        expect(seen?.model?.modelID).toBe(ModelV2.ID.make("gpt-5"))
+        expect(seen?.variant).toBeUndefined()
+      }),
+    {
+      config: {
+        delegation_models: [
+          { model: "openai/gpt-5", description: "OpenAI reasoning model" },
+        ],
+      },
+    },
+  )
+
+  it.instance(
+    "correctly parses multi-slash model IDs via Provider.parseModel",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+        const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+        yield* def.execute(
+          {
+            description: "analyze code",
+            prompt: "find the bug",
+            subagent_type: "general",
+            model: "openrouter/anthropic/claude-sonnet-4-5",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        // parseModel splits on first "/" only
+        expect(seen?.model?.providerID).toBe(ProviderV2.ID.make("openrouter"))
+        expect(seen?.model?.modelID).toBe(ModelV2.ID.make("anthropic/claude-sonnet-4-5"))
+        expect(seen?.variant).toBeUndefined()
+      }),
+    {
+      config: {
+        delegation_models: [
+          { model: "openrouter/anthropic/claude-sonnet-4-5", description: "OpenRouter Anthropic model" },
+        ],
+      },
+    },
+  )
+
+  // ── end-to-end integration: verify subagent session receives model override ──
+
+  it.instance(
+    "subagent session has correct model and no variant when model param is used",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+        const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+        const result = yield* def.execute(
+          {
+            description: "lookup report",
+            prompt: "produce a report",
+            subagent_type: "general",
+            model: "test/reasoning-model",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        // verify the child session got created
+        const kids = yield* sessions.children(chat.id)
+        expect(kids).toHaveLength(1)
+        expect(kids[0]?.id).toBe(result.metadata.sessionId)
+
+        // verify the model was correctly forwarded to the prompt input
+        expect(seen?.sessionID).toBe(result.metadata.sessionId)
+        expect(seen?.model?.providerID).toBe(ProviderV2.ID.make("test"))
+        expect(seen?.model?.modelID).toBe(ModelV2.ID.make("reasoning-model"))
+        expect(seen?.variant).toBeUndefined()
+      }),
+    {
+      config: {
+        delegation_models: [
+          { model: "test/reasoning-model", description: "Test reasoning model" },
+        ],
+      },
+    },
+  )
 })

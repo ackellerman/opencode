@@ -19,6 +19,11 @@ import { ConfigSkillsV1 } from "./skills"
 
 export type Layout = ConfigLayoutV1.Layout
 
+export const DelegationModel = Schema.Struct({
+  model: Schema.String,
+  description: Schema.String,
+})
+
 export const WellKnown = Schema.Struct({
   config: Schema.optional(Schema.Json),
   remote_config: Schema.optional(Schema.Json),
@@ -83,6 +88,10 @@ export const Info = Schema.Struct({
   }),
   subagent_depth: Schema.optional(NonNegativeInt).annotate({
     description: "Maximum subagent nesting depth. Defaults to 1, which prevents subagents from launching subagents.",
+  }),
+  delegation_models: Schema.optional(Schema.Array(DelegationModel)).annotate({
+    description:
+      "Optional list of models available for subagent delegation. Each entry maps a model string to a human-readable description.",
   }),
   username: Schema.optional(Schema.String).annotate({
     description: "Custom username to display in conversations instead of system username",
